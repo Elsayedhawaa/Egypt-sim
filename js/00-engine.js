@@ -34,6 +34,15 @@ function gameYear() { return 2001 + (S?.age || 6); }
 function money(n) { const c = C(); return Math.round(n).toLocaleString() + ' ' + c.currency; }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(v))); }
 function log(msg) { if (!S.log) S.log = []; S.log.unshift({ age: S.age, year: gameYear(), msg }); if (S.log.length > 200) S.log.pop(); }
+// Apply stat effects. Used by year ticks in views (16, 17, etc).
+// Example: fx({ happiness: -5, social: +2 })
+function fx(effects) {
+  if (!effects || !S) return;
+  ['happiness', 'health', 'smarts', 'social'].forEach(k => {
+    if (typeof effects[k] === 'number') S[k] = clamp(S[k] + effects[k], 0, 100);
+  });
+  if (typeof effects.wealth === 'number') S.wealth += effects.wealth;
+}
 
 /* ============================================================
    NEW LIFE
