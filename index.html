@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>World Life</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0a12;color:#e8e8f2;font-family:system-ui,sans-serif;padding:12px;max-width:520px;margin:0 auto;min-height:100vh}
+.card{background:#14141f;border:1px solid #25253a;border-radius:10px;padding:14px;margin-bottom:10px}
+h3{font-size:1rem;margin-bottom:8px;color:#8b5cf6}
+h4{font-size:.85rem;margin:10px 0 6px;color:#8b5cf6}
+input,select{width:100%;padding:10px;background:#0a0a12;color:#e8e8f2;border:1px solid #25253a;border-radius:8px;font:inherit}
+.pill{padding:10px;border:1px solid #25253a;border-radius:8px;cursor:pointer;background:transparent;color:#888;font:inherit;text-align:center}
+.pill.on{background:#8b5cf6;color:#fff;border-color:#8b5cf6}
+#tabs{display:flex;gap:4px;overflow-x:auto;margin-bottom:10px}
+#tabs button{padding:8px 12px;border:1px solid #25253a;border-radius:6px;font-size:.8rem;cursor:pointer;white-space:nowrap;font:inherit;background:#14141f;color:#888}
+#tabs button.on{background:#8b5cf6;color:#fff;border-color:#8b5cf6}
+#bottom button{width:100%;padding:14px;background:#8b5cf6;color:#fff;border:none;border-radius:10px;font-size:1rem;font-weight:bold;cursor:pointer}
+#bottom button:disabled{background:#25253a;color:#666;cursor:not-allowed}
+.opt{width:100%;margin-top:6px;padding:11px;background:#1a1a2a;border:1px solid #333;color:#fff;border-radius:6px;text-align:left;cursor:pointer;font:inherit}
+.opt:hover:not(:disabled){border-color:#8b5cf6}
+.opt:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;justify-content:space-between;padding:5px 0;font-size:.9rem;border-bottom:1px solid #1a1a2a}
+.row:last-child{border:none}
+.muted{color:#888}
+.small{font-size:.82rem}
+.good{color:#34d399}
+.bad{color:#fb7185}
+.gold{color:#fbbf24}
+.mono{font-family:monospace}
+</style>
+</head>
+<body>
+<div id="header"></div>
+<div id="tabs"></div>
+<div id="view"></div>
+<div id="bottom"></div>
+<script>
+
+/* ============================================================
+   WORLD LIFE — engine v3
+   Age 6-100, Egypt/USA/Saudi, real data
+   ============================================================ */
+
+const SAVE_KEY = 'world_life_v3';
+let S = null;
+let activeTab = 'life';
+let START = { name: '', gender: 'm', country: 'egy' };
+
+/* ============================================================
+   GAMEHOOKS
+   ============================================================ */
+const GameHooks = {
+  year: [], render: [], newGame: [], migrate: [],
+  on(name, fn) { if (this[name]) this[name].push(fn); },
+  run(name, ...args) { if (this[name]) this[name].forEach(fn => { try { fn(...args); } catch(e) { console.error(e); } }); },
+};
+
+/* ============================================================
+   COUNTRY PACKS
+   ============================================================
+   👇 ADD NEW COUNTRIES HERE 👇
+   Each country needs: id, name, flag, currency, rate, salary,
+   prices, salaryTiers, schools, universities, jobs, events
+   ============================================================ */
+const COUNTRIES = {
+  egy: {
+    id: 'egy', name: 'Egypt', flag: '🇪🇬',
+    currency: 'EGP', rate: 52.7,
+    salary: 84000,
+    prices: {
+      food: 54000, phone: 4800, transport: 8000, rent: 120000,
+    },
+    salaryTiers: { entry: 84000, mid: 180000, senior: 360000, exec: 700000 },
+    schools: [
+      { id: 'national', name: 'National School', cost: 0, smarts: 1.0 },
+      { id: 'private', name: 'Private School', cost: 25000, smarts: 1.4 },
+      { id: 'international', name: 'International School', cost: 280000, smarts: 1.7 },
+    ],
+    universities: [
+      { id: 'cairo', name: 'Cairo University', type: 'public', tuition: 12000, cutoff: 78 },
+      { id: 'alex', name: 'Alexandria University', type: 'public', tuition: 12000, cutoff: 75 },
+      { id: 'ain', name: 'Ain Shams University', type: 'public', tuition: 12000, cutoff: 72 },
+      { id: 'auc', name: 'American University in Cairo', type: 'private', tuition: 600000, cutoff: 60 },
+      { id: 'guc', name: 'German University in Cairo', type: 'private', tuition: 300000, cutoff: 60 },
+      { id: 'bue', name: 'British University in Egypt', type: 'private', tuition: 250000, cutoff: 58 },
+      { id: 'aastmt', name: 'Arab Academy for Science & Tech', type: 'private', tuition: 200000, cutoff: 55 },
+      { id: 'miu', name: 'Misr International University', type: 'private', tuition: 200000, cutoff: 55 },
+    ],
+    jobs: [
+      { id: 'egy_bpo_en', title: 'Customer Service (English)', company: 'Vodafone VOIS', salary: 84000, minAge: 18, degree: null },
+      { id: 'egy_bpo_de', title: 'Customer Service (German)', company: 'Teleperformance', salary: 180000, minAge: 18, degree: null },
+      { id: 'egy_cashier', title: 'Cashier', company: 'Spinneys', salary: 48000, minAge: 18, degree: null },
+      { id: 'egy_acct', title: 'Junior Accountant', company: 'CIB', salary: 144000, minAge: 22, degree: 'business' },
+      { id: 'egy_dev', title: 'Junior Developer', company: 'Fawry', salary: 216000, minAge: 22, degree: 'cs' },
+      { id: 'egy_bank', title: 'Banking Operations', company: 'NBE', salary: 120000, minAge: 22, degree: 'business' },
+      { id: 'egy_law', title: 'Junior Legal Associate', company: 'Matouk Bassiouny', salary: 96000, minAge: 22, degree: 'law' },
+      { id: 'egy_doc', title: 'Imtyaz Doctor', company: 'Government Hospital', salary: 42000, minAge: 24, degree: 'medicine' },
+    ],
+    events: [
+      { id: 'egy_blackout', minAge: 20, maxAge: 40,
+        title: 'Summer blackout',
+        text: 'The power cuts for 4 hours. The AC dies. It is 41°C in Cairo.',
+        choices: [
+          { label: 'Buy a rechargeable fan (800 EGP)', effect: s => { s.wealth -= 800; s.happiness += 2; } },
+          { label: 'Suffer in silence', effect: s => { s.happiness -= 5; s.health -= 2; } },
+        ]
+      },
+      { id: 'egy_egp_crash', minAge: 22, maxAge: 45,
+        title: 'The pound slips again',
+        text: 'You check an iPhone price. It costs 3 months of your salary.',
+        choices: [
+          { label: 'Buy gold to protect savings', effect: s => { if (s.wealth > 50000) { s.wealth -= 50000; s.flags.goldHedge = true; s.happiness += 3; } else { s.happiness -= 2; } } },
+          { label: 'Keep saving in EGP', effect: s => { s.happiness -= 3; s.flags.egpRisk = true; } },
+        ]
+      },
+    ],
+  },
+  
+  usa: {
+    id: 'usa', name: 'United States', flag: '🇺🇸',
+    currency: 'USD', rate: 1,
+    salary: 63000,
+    prices: { food: 6000, phone: 720, transport: 2400, rent: 18000 },
+    salaryTiers: { entry: 45000, mid: 75000, senior: 120000, exec: 200000 },
+    schools: [
+      { id: 'public', name: 'Public School', cost: 0, smarts: 1.1 },
+      { id: 'private', name: 'Private School', cost: 18000, smarts: 1.5 },
+    ],
+    universities: [
+      { id: 'state', name: 'State University', type: 'public', tuition: 22000, cutoff: 60 },
+      { id: 'uc_berkeley', name: 'UC Berkeley', type: 'public', tuition: 48000, cutoff: 85 },
+      { id: 'harvard', name: 'Harvard', type: 'private', tuition: 60000, cutoff: 90 },
+      { id: 'mit', name: 'MIT', type: 'private', tuition: 62000, cutoff: 92 },
+      { id: 'stanford', name: 'Stanford', type: 'private', tuition: 62000, cutoff: 90 },
+    ],
+    jobs: [
+      { id: 'usa_retail', title: 'Retail Associate', company: 'Walmart', salary: 35000, minAge: 18, degree: null },
+      { id: 'usa_warehouse', title: 'Warehouse Worker', company: 'Amazon', salary: 38000, minAge: 18, degree: null },
+      { id: 'usa_dev', title: 'Software Engineer', company: 'Google', salary: 120000, minAge: 22, degree: 'cs' },
+      { id: 'usa_bank', title: 'Financial Analyst', company: 'JPMorgan', salary: 95000, minAge: 22, degree: 'business' },
+      { id: 'usa_nurse', title: 'Registered Nurse', company: 'Kaiser Permanente', salary: 85000, minAge: 22, degree: 'medicine' },
+      { id: 'usa_lawyer', title: 'Associate Attorney', company: 'Skadden', salary: 215000, minAge: 25, degree: 'law' },
+    ],
+    events: [
+      { id: 'usa_student_debt', minAge: 22, maxAge: 26,
+        title: 'First student loan bill',
+        text: 'You graduated. First payment arrives: $450/month.',
+        choices: [
+          { label: 'Pay it and live tight', effect: s => { s.wealth -= 5400; s.happiness -= 4; } },
+          { label: 'Defer it', effect: s => { s.flags.loanDeferred = true; s.happiness += 2; } },
+        ]
+      },
+      { id: 'usa_health_bill', minAge: 25, maxAge: 45,
+        title: 'The hospital bill',
+        text: 'Short ER visit. The bill is $3,200 before insurance.',
+        choices: [
+          { label: 'Pay it', effect: s => { s.wealth -= 3200; } },
+          { label: 'Set up a payment plan', effect: s => { s.wealth -= 500; s.flags.medicalDebt = 2700; s.happiness -= 2; } },
+        ]
+      },
+    ],
+  },
+  
+  sau: {
+    id: 'sau', name: 'Saudi Arabia', flag: '🇸🇦',
+    currency: 'SAR', rate: 3.75,
+    salary: 96000,
+    prices: { food: 30000, phone: 2400, transport: 6000, rent: 60000 },
+    salaryTiers: { entry: 96000, mid: 180000, senior: 300000, exec: 500000 },
+    schools: [
+      { id: 'public', name: 'Public School', cost: 0, smarts: 1.0 },
+      { id: 'private', name: 'Private School', cost: 40000, smarts: 1.4 },
+    ],
+    universities: [
+      { id: 'ksu', name: 'King Saud University', type: 'public', tuition: 0, cutoff: 75 },
+      { id: 'kfupm', name: 'KFUPM', type: 'public', tuition: 0, cutoff: 85 },
+      { id: 'kaust', name: 'KAUST', type: 'private', tuition: 80000, cutoff: 90 },
+    ],
+    jobs: [
+      { id: 'sau_aramco', title: 'Engineer', company: 'Aramco', salary: 240000, minAge: 22, degree: 'cs' },
+      { id: 'sau_bank', title: 'Banker', company: 'SNB', salary: 180000, minAge: 22, degree: 'business' },
+      { id: 'sau_retail', title: 'Retail Associate', company: 'Al Rajhi', salary: 60000, minAge: 18, degree: null },
+    ],
+    events: [
+      { id: 'sau_iqama', minAge: 22, maxAge: 40,
+        title: 'Iqama renewal',
+        text: 'Your residence permit is up for renewal. Employer is deciding.',
+        choices: [
+          { label: 'Wait and hope', effect: s => { s.flags.iqamaRisk = true; } },
+          { label: 'Ask employer for sponsorship', effect: s => { s.flags.iqamaSafe = true; s.happiness += 2; } },
+        ]
+      },
+    ],
+  },
+  
+  /* 👇👇👇 ADD NEW COUNTRIES HERE 👇👇👇
+     Copy a block above, change id, name, flag, currency, rate,
+     salary, prices, salaryTiers, schools, universities, jobs, events
+  */
+};
+
+/* ============================================================
+   GLOBAL EVENTS
+   ============================================================ */
+const GLOBAL_EVENTS = [
+  { id: 'school_choice', minAge: 6, maxAge: 6,
+    title: 'First day of school',
+    text: 'Your family must choose a school for you.',
+    dynamic: 'school' // uses country schools
+  },
+  { id: 'first_friend', minAge: 7, maxAge: 9,
+    title: 'A new friend',
+    text: 'A classmate asks if you want to play football after school.',
+    choices: [
+      { label: 'Play football', effect: s => { s.happiness += 5; s.social += 5; } },
+      { label: 'Go home and study', effect: s => { s.smarts += 3; s.social -= 2; } },
+    ]
+  },
+  { id: 'hobby', minAge: 10, maxAge: 12,
+    title: 'A new hobby',
+    text: 'You have some free time.',
+    choices: [
+      { label: 'Read books', effect: s => { s.smarts += 4; } },
+      { label: 'Play video games', effect: s => { s.happiness += 4; } },
+      { label: 'Play sports', effect: s => { s.health += 4; s.social += 3; } },
+    ]
+  },
+  { id: 'study_choice', minAge: 13, maxAge: 15,
+    title: 'Preparing for exams',
+    text: 'Exams are coming up.',
+    choices: [
+      { label: 'Study hard', effect: s => { s.smarts += 5; s.happiness -= 3; } },
+      { label: 'Coast', effect: s => { s.smarts += 1; } },
+      { label: 'Skip studying', effect: s => { s.smarts -= 2; s.happiness += 4; } },
+    ]
+  },
+  { id: 'gender_expectations', minAge: 22, maxAge: 28,
+    title: 'Family expectations',
+    text: s => s.gender === 'f' ? 'Your mother asks when you will marry. Your career matters less to her than your future husband.' : 'Your father asks when you will buy an apartment. He says a man with no property cannot marry.',
+    choices: [
+      { label: 'Push back', effect: s => { s.happiness += 2; s.social -= 2; } },
+      { label: 'Stay quiet', effect: s => { s.happiness -= 3; } },
+    ]
+  },
+  { id: 'marriage_opportunity', minAge: 24, maxAge: 35,
+    title: 'Someone special',
+    text: 'You meet someone you could see yourself with.',
+    choices: [
+      { label: 'Pursue it', effect: s => { s.flags.hasPartner = true; s.happiness += 8; s.social += 5; } },
+      { label: 'Stay focused on career', effect: s => { s.happiness -= 2; s.smarts += 2; } },
+    ]
+  },
+  { id: 'child_opportunity', minAge: 27, maxAge: 40,
+    title: 'Starting a family',
+    text: 'You and your partner talk about having a child.',
+    choices: [
+      { label: 'Have a child', effect: s => { s.children = (s.children || 0) + 1; s.happiness += 10; s.wealth -= (C().prices.rent * 0.3); } },
+      { label: 'Not yet', effect: s => { s.happiness += 2; } },
+    ]
+  },
+  /* 👇 ADD MORE GLOBAL EVENTS HERE 👇 */
+];
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+function C() { return COUNTRIES[S?.country] || COUNTRIES.egy; }
+function gameYear() { return 2001 + (S?.age || 6); }
+function money(n) { const c = C(); return Math.round(n).toLocaleString() + ' ' + c.currency; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(v))); }
+function log(msg) { if (!S.log) S.log = []; S.log.unshift({ age: S.age, year: gameYear(), msg }); if (S.log.length > 200) S.log.pop(); }
+
+/* ============================================================
+   NEW LIFE
+   ============================================================ */
+function newLife() {
+  const c = COUNTRIES[START.country];
+  S = {
+    name: START.name || 'You',
+    gender: START.gender,
+    country: START.country,
+    currency: c.currency,
+    age: 6,
+    health: 100, happiness: 100, smarts: 50, social: 50,
+    wealth: 0,
+    school: null,
+    uni: null,
+    degree: null,
+    job: null,
+    children: 0,
+    housing: 'parents',
+    family: [],
+    log: [],
+    flags: {},
+    pending: null,
+    evId: null,
+  };
+  S.family.push({ role: 'Mother', name: 'Mother', age: 30, bond: 70, alive: true });
+  S.family.push({ role: 'Father', name: 'Father', age: 32, bond: 70, alive: true });
+  log(`Born in ${c.name}, 2007. You are 6 years old.`);
+  log(START.gender === 'f' ? 'You are a girl.' : 'You are a boy.');
+  
+  // Auto-trigger school choice event
+  S.pending = prepareEvent(GLOBAL_EVENTS[0]);
+  save(); render();
+}
+
+/* ============================================================
+   EVENT PREPARATION
+   ============================================================ */
+function prepareEvent(e) {
+  if (e.dynamic === 'school') {
+    const c = C();
+    return {
+      title: e.title,
+      text: e.text,
+      choices: c.schools.map(sch => ({
+        label: `${sch.name}${sch.cost > 0 ? ' (' + sch.cost.toLocaleString() + ' ' + c.currency + '/yr, family pays)' : ' (free)'}`,
+        effect: s => { s.school = sch.id; }
+      }))
+    };
+  }
+  return e;
+}
+
+/* ============================================================
+   AGE UP
+   ============================================================ */
+function ageUp() {
+  if (S.pending) return;
+  S.age++;
+  
+  // Family aging
+  S.family.forEach(m => { if (m.alive) m.age++; });
+  
+  // School effects (age 6-18)
+  if (S.age >= 6 && S.age < 18 && S.school) {
+    const sch = C().schools.find(x => x.id === S.school);
+    if (sch) S.smarts = clamp(S.smarts + sch.smarts, 0, 100);
+  }
+  
+  // Thanaweya exam at 18 (if in school system)
+  if (S.age === 18 && S.school && !S.uni && !S.degree) {
+    const score = clamp(S.smarts + Math.random() * 20 - 10, 0, 100);
+    S.thanaweyaScore = score;
+    log(`Thanaweya amma result: ${score.toFixed(1)}%`);
+  }
+  
+  // Job income + promotion
+  if (S.job) {
+    S.wealth += S.job.salary;
+    S.job.years = (S.job.years || 0) + 1;
+    if (S.job.years >= 2 && Math.random() < 0.15) {
+      S.job.level = (S.job.level || 0) + 1;
+      S.job.salary = Math.round(S.job.salary * 1.3);
+      S.job.title = 'Senior ' + S.job.title;
+      log(`Promoted to ${S.job.title}! Salary now ${money(S.job.salary)}/year.`);
+    }
+    // Firing chance
+    if (Math.random() < 0.03) {
+      log(`You were fired from ${S.job.company}.`);
+      S.job = null;
+    }
+  }
+  
+  // Living expenses (adults)
+  if (S.age >= 18) {
+    const c = C();
+    let expenses = c.prices.food + c.prices.phone + c.prices.transport;
+    if (S.housing === 'rented') expenses += c.prices.rent;
+    S.wealth -= expenses;
+  }
+  
+  // Health decline after 50
+  if (S.age > 50) S.health = clamp(S.health - 1, 0, 100);
+  
+  // Run year hooks (for future systems)
+  GameHooks.run('year', S);
+  
+  // Clamp stats
+  ['health', 'happiness', 'smarts', 'social'].forEach(k => { S[k] = clamp(S[k], 0, 100); });
+  
+  // Pick event
+  const allEvents = [...GLOBAL_EVENTS, ...(C().events || [])];
+  const eligible = allEvents.filter(e => 
+    S.age >= e.minAge && S.age <= e.maxAge && 
+    !S.flags['evt_' + e.id]
+  );
+  if (eligible.length && Math.random() < 0.7) {
+    const e = eligible[Math.floor(Math.random() * eligible.length)];
+    S.pending = prepareEvent(e);
+    S.evId = e.id;
+    log(`📖 ${e.title}`);
+  }
+  
+  save(); render();
+}
+
+/* ============================================================
+   CHOOSE EVENT
+   ============================================================ */
+function chooseEvent(i) {
+  const e = S.pending;
+  if (!e || !e.choices[i]) return;
+  const choice = e.choices[i];
+  if (typeof choice.effect === 'function') choice.effect(S);
+  ['health', 'happiness', 'smarts', 'social'].forEach(k => { S[k] = clamp(S[k], 0, 100); });
+  if (S.evId) S.flags['evt_' + S.evId] = true;
+  log(`→ ${choice.label}`);
+  S.pending = null;
+  S.evId = null;
+  save(); render();
+}
+
+/* ============================================================
+   APPLY FOR JOB
+   ============================================================ */
+function applyForJob(jobId) {
+  const job = C().jobs.find(j => j.id === jobId);
+  if (!job) return;
+  if (S.age < job.minAge) return;
+  if (job.degree && S.degree !== job.degree) return;
+  if (S.job) return;
+  
+  // Simple 3-round interview
+  const chance = 0.25 + (S.smarts / 200) + (S.social / 400) + ((S.uni || S.degree) ? 0.15 : 0);
+  if (Math.random() < chance) {
+    S.job = {
+      id: job.id, title: job.title, company: job.company,
+      salary: job.salary, level: 0, years: 0,
+    };
+    log(`Hired at ${job.company} as ${job.title}! Salary ${money(job.salary)}/year.`);
+    S.happiness = clamp(S.happiness + 5, 0, 100);
+  } else {
+    log(`Rejected by ${job.company} for ${job.title}.`);
+    S.happiness = clamp(S.happiness - 2, 0, 100);
+  }
+  render();
+}
+
+/* ============================================================
+   ENROLL IN UNIVERSITY
+   ============================================================ */
+function enrollUniversity(uniId) {
+  const uni = C().universities.find(u => u.id === uniId);
+  if (!uni) return;
+  if (!S.thanaweyaScore || S.thanaweyaScore < uni.cutoff) {
+    log(`Rejected by ${uni.name} — thanaweya score too low.`);
+    render(); return;
+  }
+  if (S.wealth < uni.tuition && uni.type === 'private') {
+    log(`Cannot afford ${uni.name}. Tuition: ${money(uni.tuition)}/year.`);
+    render(); return;
+  }
+  S.uni = {
+    id: uni.id, name: uni.name, type: uni.type,
+    tuition: uni.tuition, year: 0, yearsTotal: 4,
+  };
+  if (uni.type === 'private') S.wealth -= uni.tuition;
+  log(`Enrolled at ${uni.name}. Tuition: ${money(uni.tuition)}/year.`);
+  render();
+}
+
+function quitJob() {
+  if (!S.job) return;
+  log(`Resigned from ${S.job.company}.`);
+  S.job = null;
+  render();
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function render() {
+  if (!S) { renderStart(); return; }
+  document.getElementById('header').innerHTML = header();
+  document.getElementById('tabs').innerHTML = tabs();
+  document.getElementById('view').innerHTML = 
+    (S.pending ? eventCard(S.pending) : '') + 
+    (VIEWS[activeTab] || VIEWS.life)();
+  const b = document.getElementById('bottom');
+  if (S.pending) b.innerHTML = `<button disabled>Choose an option above</button>`;
+  else if (S.age >= 100) b.innerHTML = `<button onclick="reset()">Life complete — Start over</button>`;
+  else b.innerHTML = `<button onclick="ageUp()">Next Year → Age ${S.age + 1}</button>`;
+  GameHooks.run('render', S);
+}
+
+function renderStart() {
+  document.getElementById('header').innerHTML = '';
+  document.getElementById('tabs').innerHTML = '';
+  document.getElementById('bottom').innerHTML = '';
+  const countryKeys = Object.keys(COUNTRIES);
+  document.getElementById('view').innerHTML = `
+    <div class="card" style="text-align:center;padding:24px">
+      <h1 style="font-size:2rem;color:#8b5cf6;margin-bottom:4px">World Life</h1>
+      <p class="muted small">A life simulator. Born 2001. Start at age 6.</p>
+    </div>
+    <div class="card">
+      <h3>Your name</h3>
+      <input id="start-name" value="${START.name}" placeholder="Enter name" oninput="START.name=this.value">
+    </div>
+    <div class="card">
+      <h3>You are</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+        <button class="pill ${START.gender==='m'?'on':''}" onclick="setGender('m')">👨 Man</button>
+        <button class="pill ${START.gender==='f'?'on':''}" onclick="setGender('f')">👩 Woman</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Born in</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px">
+        ${countryKeys.map(id => {
+          const c = COUNTRIES[id];
+          return `<button class="pill ${START.country===id?'on':''}" onclick="setCountry('${id}')">${c.flag}<br><span class="small">${c.name}</span></button>`;
+        }).join('')}
+      </div>
+    </div>
+    <button onclick="startGame()" style="width:100%;padding:16px;background:#8b5cf6;color:#fff;border:none;border-radius:10px;font-size:1rem;font-weight:bold;cursor:pointer;margin-top:10px">Begin Life</button>
+    ${localStorage.getItem(SAVE_KEY) ? `<button onclick="loadGame()" style="width:100%;padding:14px;background:transparent;color:#8b5cf6;border:1px solid #8b5cf6;border-radius:10px;font-size:.9rem;cursor:pointer;margin-top:8px">Continue saved life</button>` : ''}
+  `;
+}
+
+function setGender(g) { START.gender = g; renderStart(); }
+function setCountry(c) { START.country = c; renderStart(); }
+function startGame() { newLife(); activeTab = 'life'; render(); }
+
+function header() {
+  return `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div class="muted" style="font-size:.7rem;letter-spacing:.06em">AGE ${S.age} · ${gameYear()} · ${C().flag} ${C().name}</div>
+        <div style="font-size:1.15rem;font-weight:bold;margin-top:2px">${S.name} ${S.gender==='f'?'♀':'♂'}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="muted" style="font-size:.7rem">WEALTH</div>
+        <div class="mono good" style="font-weight:bold">${money(S.wealth)}</div>
+        <button onclick="reset()" style="background:none;border:none;color:#666;font-size:.65rem;cursor:pointer;text-decoration:underline;margin-top:4px;padding:0">restart</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+      ${stat('Health', S.health, '#fb7185')}
+      ${stat('Happiness', S.happiness, '#fbbf24')}
+      ${stat('Smarts', S.smarts, '#22d3ee')}
+      ${stat('Social', S.social, '#8b5cf6')}
+    </div>
+  </div>`;
+}
+
+function stat(n, v, color) {
+  return `<div><div style="display:flex;justify-content:space-between;font-size:.7rem;color:#888"><span>${n}</span><span>${v}%</span></div><div style="height:4px;background:#25253a;border-radius:2px;margin-top:3px"><div style="height:100%;width:${v}%;background:${color};border-radius:2px"></div></div></div>`;
+}
+
+function tabs() {
+  const list = [['life','Life'],['school','Education'],['career','Career'],['family','Family'],['assets','Assets']];
+  return list.map(([id, l]) => `<button class="${activeTab===id?'on':''}" onclick="switchTab('${id}')">${l}</button>`).join('');
+}
+
+function eventCard(e) {
+  const text = typeof e.text === 'function' ? e.text(S) : e.text;
+  return `<div class="card" style="border-color:#8b5cf6">
+    <h3>${e.title}</h3>
+    <p class="muted small" style="line-height:1.5;margin-bottom:10px">${text}</p>
+    ${e.choices.map((c,i) => `<button class="opt" onclick="chooseEvent(${i})">${c.label}</button>`).join('')}
+  </div>`;
+}
+
+/* ============================================================
+   VIEWS
+   ============================================================ */
+const VIEWS = {
+  life: () => `
+    <div class="card">
+      <h3>Life</h3>
+      <p class="muted small">${S.age} years old, ${C().name}. ${S.school ? 'In school.' : ''}${S.uni ? ' University: ' + S.uni.name + ' (Year ' + S.uni.year + ').' : ''}${S.degree ? ' Degree: ' + S.degree + '.' : ''}${S.job ? ' Working at ' + S.job.company + '.' : ''}</p>
+    </div>
+    <div class="card">
+      <h3>Life Log</h3>
+      <div style="max-height:320px;overflow-y:auto;font-size:.85rem">
+        ${S.log.map(r => `<div style="padding:5px 0;border-bottom:1px solid #1a1a2a"><span class="muted mono" style="font-size:.75rem">Age ${r.age}</span> · ${r.msg}</div>`).join('')}
+      </div>
+    </div>`,
+  
+  school: () => {
+    if (S.age < 6) return `<div class="card"><h3>Education</h3><p class="muted">Not yet in school.</p></div>`;
+    
+    if (S.age < 18) {
+      const cur = S.school ? (C().schools.find(x=>x.id===S.school)||{name:S.school}).name : 'Not enrolled';
+      return `<div class="card"><h3>School</h3><p class="muted small">Current: <b style="color:#e8e8f2">${cur}</b></p>${S.thanaweyaScore ? `<p class="small" style="margin-top:8px">Thanaweya score: <b class="gold">${S.thanaweyaScore.toFixed(1)}%</b></p>` : ''}</div>`;
+    }
+    
+    // Age 18-22: University options
+    if (S.age >= 18 && S.age <= 22 && !S.uni && !S.degree) {
+      const score = S.thanaweyaScore || 0;
+      return `<div class="card">
+        <h3>University (tansik)</h3>
+        <p class="muted small">Your thanaweya score: <b class="gold">${score.toFixed(1)}%</b></p>
+        <h4>Options</h4>
+        ${C().universities.map(u => {
+          const eligible = score >= u.cutoff;
+          const affordable = u.type === 'public' || S.wealth >= u.tuition;
+          return `<div class="row"><span>${u.name} <span class="muted small">· ${u.type}</span></span><span><b class="mono">${u.tuition === 0 ? 'free' : money(u.tuition) + '/yr'}</b>${eligible ? `<button class="opt" style="margin-top:4px;padding:6px" onclick="enrollUniversity('${u.id}')" ${!affordable?'disabled':''}>${affordable?'Enroll':'Cannot afford'}</button>` : `<span class="bad small" style="display:block;margin-top:4px">Needs ${u.cutoff}% (you have ${score.toFixed(0)}%)</span>`}</span></div>`;
+        }).join('')}
+      </div>`;
+    }
+    
+    if (S.uni) {
+      return `<div class="card"><h3>${S.uni.name}</h3><p class="muted small">Year ${S.uni.year} of ${S.uni.yearsTotal}. Tuition: ${money(S.uni.tuition)}/year.</p></div>`;
+    }
+    
+    if (S.degree) {
+      return `<div class="card"><h3>Graduated</h3><p class="muted small">Degree: ${S.degree}. Career unlocked.</p></div>`;
+    }
+    
+    return `<div class="card"><h3>Education</h3><p class="muted">—</p></div>`;
+  },
+  
+  career: () => {
+    if (S.age < 18) return `<div class="card"><h3>Career</h3><p class="muted">Available from age 18.</p></div>`;
+    
+    if (S.job) {
+      return `<div class="card">
+        <h3>${S.job.title}</h3>
+        <p class="muted small">${S.job.company}</p>
+        <div class="row"><span>Salary</span><b class="mono good">${money(S.job.salary)}/year</b></div>
+        <div class="row"><span>Level</span><b>${(S.job.level||0)+1}/5</b></div>
+        <div class="row"><span>Tenure</span><b>${S.job.years} year(s)</b></div>
+        <button class="opt" style="margin-top:10px" onclick="quitJob()">Resign</button>
+      </div>`;
+    }
+    
+    return `<div class="card">
+      <h3>Job Market</h3>
+      <p class="muted small">Choose a job to apply. Each application passes 3 rounds or gets rejected. Having a degree helps.</p>
+      ${C().jobs.map(j => {
+        const eligible = S.age >= j.minAge && (!j.degree || S.degree === j.degree);
+        const reason = !eligible ? (S.age < j.minAge ? `Age ${j.minAge}+` : `Needs ${j.degree} degree`) : '';
+        return `<div class="row"><span>${j.title} <span class="muted small">· ${j.company}</span></span><span><b class="mono">${money(j.salary)}/yr</b>${eligible ? `<button class="opt" style="margin-top:4px;padding:6px" onclick="applyForJob('${j.id}')">Apply</button>` : `<span class="bad small" style="display:block;margin-top:4px">${reason}</span>`}</span></div>`;
+      }).join('')}
+    </div>`;
+  },
+  
+  family: () => `
+    <div class="card">
+      <h3>Family</h3>
+      ${S.family.map(m => `
+        <div class="row"><span><b>${m.name}</b> · ${m.role}</span><span class="muted small">age ${m.age} · bond ${m.bond}%</span></div>
+      `).join('')}
+      ${S.children > 0 ? `<div class="row" style="margin-top:8px"><span>Children</span><b>${S.children}</b></div>` : ''}
+    </div>`,
+  
+  assets: () => {
+    if (S.age < 18) return `<div class="card"><h3>Assets</h3><p class="muted">Available from age 18.</p></div>`;
+    
+    return `<div class="card">
+      <h3>Housing</h3>
+      <p class="muted small">Current: <b>${S.housing === 'parents' ? 'Living with parents' : S.housing === 'rented' ? 'Renting' : 'Owned'}</b></p>
+      ${S.housing === 'parents' ? `<button class="opt" style="margin-top:8px" onclick="S.housing='rented';log('Rented an apartment: '+money(C().prices.rent)+'/year.');render()" ${S.wealth < C().prices.rent ? 'disabled' : ''}>Rent an apartment (${money(C().prices.rent)}/yr)${S.wealth < C().prices.rent ? ' — cannot afford' : ''}</button>` : ''}
+    </div>
+    <div class="card">
+      <h3>Wealth</h3>
+      <div class="row"><span>Cash</span><b class="mono">${money(S.wealth)}</b></div>
+      <div class="row"><span>Annual income</span><b class="mono good">${money(S.job ? S.job.salary : 0)}</b></div>
+      <div class="row"><span>Annual expenses</span><b class="mono bad">${money(C().prices.food + C().prices.phone + C().prices.transport + (S.housing === 'rented' ? C().prices.rent : 0))}</b></div>
+    </div>
+    <div class="card">
+      <p class="muted small">Compounds, cars, banking, marriage, immigration systems will appear here in future updates. This is a foundation.</p>
+    </div>`;
+  },
+};
+
+/* ============================================================
+   SAVE / LOAD
+   ============================================================ */
+function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch(e) {} }
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) { S = JSON.parse(raw); activeTab = 'life'; render(); return; }
+  } catch(e) {}
+  renderStart();
+}
+function reset() {
+  if (!confirm('Reset and start over?')) return;
+  localStorage.removeItem(SAVE_KEY);
+  S = null;
+  renderStart();
+}
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+window.ageUp = ageUp;
+window.chooseEvent = chooseEvent;
+window.switchTab = (id) => { activeTab = id; render(); };
+window.startGame = startGame;
+window.setGender = setGender;
+window.setCountry = setCountry;
+window.loadGame = loadGame;
+window.reset = reset;
+window.START = START;
+window.applyForJob = applyForJob;
+window.enrollUniversity = enrollUniversity;
+window.quitJob = quitJob;
+
+renderStart();
+</script>
+</body>
+</html>
