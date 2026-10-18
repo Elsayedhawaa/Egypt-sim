@@ -948,4 +948,411 @@ window.bankDoSellGold = function(idx) {
   const g = S.bank.gold[idx];
   const prices = GOLD_PRICES[S.country] || GOLD_PRICES.egy;
   const perGram = g.karat === '24K' ? prices.perGram24K : g.karat === '21K' ? prices.perGram21K : prices.perGram18K;
-  const value = Math.round(g.grams * perGram * (1 - prices.dealer
+  
+window.bankDoSellGold = function(idx) {
+  const g = S.bank.gold[idx];
+  const prices = GOLD_PRICES[S.country] || GOLD_PRICES.egy;
+  const perGram = g.karat === '24K' ? prices.perGram24K : g.karat === '21K' ? prices.perGram21K : prices.perGram18K;
+  const value = Math.round(g.grams * perGram * (1 - prices.dealerSpread));
+  if (!confirm(`Sell ${g.grams}g ${g.karat} gold for ${money(value)}?`)) return;
+  S.wealth += value;
+  bankLogTransaction('Sold ' + g.grams + 'g ' + g.karat + ' gold', value, 'income');
+  S.bank.gold.splice(idx, 1);
+  render();
+};
+
+/* ---------- 7. INSURANCE ---------- */
+function bankInsuranceSection() {
+  const b = S.bank;
+  const available = (typeof INSURANCE_PRODUCTS !== 'undefined' ? INSURANCE_PRODUCTS[S.country] : null) || [];
+
+  let html = `<div class="card"><h3>Your Active Policies (${b.insurance.length})</h3>`;
+  if (!b.insurance.length) html += `<p class="muted small">No active policies. Protect what you own.</p>`;
+  else {
+    b.insurance.forEach((ins, i) => {
+      html += `<div style="padding:8px 0;border-bottom:1px solid #1a1a2a">
+        <div style="display:flex;justify-content:space-between"><b>${ins.name}</b><b class="mono good">${money(ins.annualPremium)}/yr</b></div>
+        <div class="muted small">${ins.type.toUpperCase()} · Coverage ${money(ins.coverage)} · ${ins.provider}</div>
+        <button class="opt" style="margin-top:4px;padding:4px 8px;font-size:.72rem;border-color:#fb7185;color:#fb7185" onclick="bankCancelInsurance(${i})">Cancel</button>
+      </div>`;
+    });
+  }
+  html += `</div>`;
+
+  html += `<div class="card"><h3>Available Policies</h3>`;
+  if (!available.length) html += `<p class="muted small">No products for this country yet.</p>`;
+  available.forEach(prod => {
+    if (b.insurance.some(i => i.productId === prod.id)) return;
+    const coverage = typeof prod.maxCoverage === 'number' ? prod.maxCoverage : Math.round(bankGetTotalAssets() * 0.5);
+    const premium = Math.round(coverage * prod.annualRate);
+    const canAfford = bankGetTotalLiquidCash() >= premium;
+    html += `<div style="padding:8px 0;border-bottom:1px solid #1a1a2a">
+      <div style="display:flex;justify-content:space-between"><b>${prod.name}</b><b class="mono">${money(premium)}/yr</b></div>
+      <div class="muted small">${prod.type.toUpperCase()} · Coverage ${money(coverage)} · ${prod.provider}</div>
+      <button class="opt" style="margin-top:4px;padding:4px 8px;font-size:.72rem" ${canAfford ? '' : 'disabled'} onclick="bankBuyInsurance('${prod.id}')">${canAfford ? 'Activate' : 'Insufficient funds'}</button>
+    </div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+window.bankBuyInsurance = function(productId) {
+  const prod = ((typeof INSURANCE_PRODUCTS !== 'undefined' ? INSURANCE_PRODUCTS[S.country] : null) || []).find(p => p.id === productId);
+  if (!prod) return;
+  const coverage = typeof prod.maxCoverage === 'number' ? prod.maxCoverage : Math.round(bankGetTotalAssets() * 0.5);
+  const premium = Math.round(coverage * prod.annualRate);
+  if (!bankSpend(premium, 'Insurance: ' + prod.name)) { log('Insufficient funds.'); return; }
+  S.bank.insurance.push({
+    id: 'ins_' + Math.random().toString(36).slice(2), productId: prod.id, name: prod.name,
+    type: prod.type, provider: prod.provider, coverage, annualPremium: premium, startedYear: gameYear(),
+  });
+  log(`✅ Activated ${prod.name}. Annual premium ${money(premium)}.`);
+  render();
+};
+
+window.bankCancelInsurance = function(idx) {
+  const ins = S.bank.insurance[idx];
+  if (!ins) return;
+  if (!confirm(`Cancel ${ins.name}?`)) return;
+  S.bank.insurance.splice(idx, 1);
+  log(`Cancelled policy: ${ins.name}.`);
+  render();
+};
+
+/* ---------- 8. SAVINGS GOALS ---------- */
+function bankGoalsSection() {
+  const b = S.bank;
+  const templates = (typeof SAVINGS_GOAL_TEMPLATES !== 'undefined' ? SAVINGS_GOAL_TEMPLATES[S.country] : null) || [];
+
+  let html = `<div class="card"><h3>Your Savings Goals (${b.goals.length})</h3>`;
+  if (!b.goals.length) html += `<p class="muted small">Set targets and watch progress. Each year, your auto-deposit goes here.</p>`;
+  else {
+    b.goals.forEach((g, i) => {
+      const pct = Math.min(100, Math.round((g.saved / Math.max(1, g.target)) * 100));
+      const done = g.saved >= g.target;
+      html += `<div style="padding:10px 0;border-bottom:1px solid #1a1a2a">
+        <div style="display:flex;justify-content:space-between"><b>${g.name}</b><b class="mono ${done ? 'good' : ''}">${money(g.saved)} / ${money(g.target)}</b></div>
+        <div style="height:6px;background:#1a1a2a;border-radius:3px;margin:6px 0"><div style="height:100%;width:${pct}%;background:${done ? '#34d399' : '#8b5cf6'};border-radius:3px"></div></div>
+        <div class="muted small">${g.monthlyDeposit > 0 ? 'Auto-deposit ' + money(g.monthlyDeposit) + '/mo · ' : ''}${pct}% complete</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="opt" style="flex:1;padding:4px;font-size:.72rem" onclick="bankGoalDeposit(${i})">Deposit</button>
+          <button class="opt" style="flex:1;padding:4px;font-size:.72rem;border-color:#fb7185;color:#fb7185" onclick="bankGoalRemove(${i})">Remove</button>
+        </div>
+      </div>`;
+    });
+  }
+  html += `</div>`;
+
+  html += `<div class="card"><h3>Add a New Goal</h3>`;
+  templates.forEach(t => {
+    if (b.goals.some(g => g.templateId === t.id)) return;
+    html += `<div style="padding:8px 0;border-bottom:1px solid #1a1a2a">
+      <div style="display:flex;justify-content:space-between"><b>${t.name}</b><b class="mono">${money(t.targetAmount)}</b></div>
+      <div class="muted small">${t.note}</div>
+      <button class="opt" style="margin-top:4px;padding:4px 8px;font-size:.72rem" onclick="bankAddGoal('${t.id}')">Create Goal</button>
+    </div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+window.bankAddGoal = function(templateId) {
+  const t = ((typeof SAVINGS_GOAL_TEMPLATES !== 'undefined' ? SAVINGS_GOAL_TEMPLATES[S.country] : null) || []).find(x => x.id === templateId);
+  if (!t) return;
+  const monthly = Math.round(Number(prompt(`Auto-deposit per month? (0 = manual)`, '0')) || 0);
+  S.bank.goals.push({
+    id: 'goal_' + Math.random().toString(36).slice(2), templateId: t.id, name: t.name,
+    target: t.targetAmount, saved: 0, monthlyDeposit: monthly, createdYear: gameYear(),
+  });
+  log(`Goal created: ${t.name} (${money(t.targetAmount)}).`);
+  render();
+};
+
+window.bankGoalDeposit = function(idx) {
+  const g = S.bank.goals[idx];
+  const amt = Math.round(Number(prompt(`Deposit into "${g.name}"?\nAvailable: ${money(bankGetTotalLiquidCash())}`, '1000')) || 0);
+  if (amt <= 0) return;
+  if (!bankSpend(amt, 'Goal deposit: ' + g.name)) { log('Insufficient funds.'); return; }
+  g.saved += amt;
+  log(`Deposited ${money(amt)} into ${g.name}. Progress: ${money(g.saved)} / ${money(g.target)}.`);
+  render();
+};
+
+window.bankGoalRemove = function(idx) {
+  const g = S.bank.goals[idx];
+  if (!g) return;
+  if (g.saved > 0) { S.wealth += g.saved; log(`Returned ${money(g.saved)} from ${g.name} to cash.`); }
+  S.bank.goals.splice(idx, 1);
+  render();
+};
+
+/* ---------- 9. TRANSFERS & REMITTANCES ---------- */
+function bankTransferSection() {
+  const services = (typeof REMITTANCE_SERVICES !== 'undefined' ? REMITTANCE_SERVICES[S.country] : null) || [];
+  const receiving = services.length === 0 ? [] : ((typeof REMITTANCE_SERVICES !== 'undefined' ? REMITTANCE_SERVICES.foreign_to_egy : null) || []);
+
+  let html = `<div class="card">
+    <h3>Send Money</h3>
+    <p class="muted small">Send to family, receive remittances, or transfer to another bank account.</p>
+  </div>`;
+
+  html += `<div class="card"><h3>Domestic Transfer</h3>
+    <p class="muted small">Move between your own accounts, or send to family in ${C().name}.</p>
+    <button class="opt" style="text-align:center;background:#8b5cf6;color:#fff;font-weight:700" onclick="bankDomesticTransfer()">New Transfer</button>
+  </div>`;
+
+  if (services.length > 0) {
+    html += `<div class="card"><h3>Remittance Services</h3>`;
+    services.forEach(svc => {
+      html += `<div style="padding:8px 0;border-bottom:1px solid #1a1a2a">
+        <div style="display:flex;justify-content:space-between"><b>${svc.name}</b><b class="mono small">${(svc.feePct * 100).toFixed(2)}% fee</b></div>
+        <div class="muted small">Speed: ${svc.speed}${svc.maxPerTransfer ? ' · Max ' + money(svc.maxPerTransfer) : ''}</div>
+      </div>`;
+    });
+    html += `<button class="opt" style="margin-top:6px;text-align:center;background:#8b5cf6;color:#fff;font-weight:700" onclick="bankSendRemittance()">Send via Remittance</button></div>`;
+  }
+
+  if (b_remitHistory_has_entries()) {
+    html += `<div class="card"><h3>Recent Transfers</h3>`;
+    S.bank.remitHistory.slice(0, 10).forEach(r => {
+      html += `<div class="row" style="padding:4px 0;font-size:.78rem">
+        <span>${r.year} · ${r.desc}</span><b class="mono">${money(r.amount)}</b>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  return html;
+}
+
+function b_remitHistory_has_entries() { return S.bank && S.bank.remitHistory && S.bank.remitHistory.length > 0; }
+
+window.bankDomesticTransfer = function() {
+  const amt = Math.round(Number(prompt(`Amount to transfer?\nAvailable: ${money(bankGetTotalLiquidCash())}`, '1000')) || 0);
+  if (amt <= 0) return;
+  const who = prompt('To who? (e.g. "Mother", "Brother", "Spouse")', 'Family member');
+  if (!who) return;
+  if (!bankSpend(amt, 'Transfer to ' + who)) { log('Insufficient funds.'); return; }
+  S.bank.remitHistory.unshift({ year: gameYear(), desc: 'Transfer to ' + who, amount: amt });
+  log(`Sent ${money(amt)} to ${who}.`);
+  render();
+};
+
+window.bankSendRemittance = function() {
+  const services = (typeof REMITTANCE_SERVICES !== 'undefined' ? REMITTANCE_SERVICES[S.country] : null) || [];
+  if (!services.length) return;
+  const svc = services[0];
+  const amt = Math.round(Number(prompt(`Send abroad via ${svc.name}?\nFee: ${(svc.feePct * 100).toFixed(2)}%\nAvailable: ${money(bankGetTotalLiquidCash())}`, '5000')) || 0);
+  if (amt <= 0) return;
+  const fee = Math.round(amt * svc.feePct);
+  const total = amt + fee;
+  if (!bankSpend(total, 'Remittance: ' + amt)) { log('Insufficient funds.'); return; }
+  S.bank.remitHistory.unshift({ year: gameYear(), desc: 'Sent abroad via ' + svc.name, amount: amt });
+  log(`Sent ${money(amt)} abroad via ${svc.name} (fee ${money(fee)}).`);
+  render();
+};
+
+/* ---------- 10. PENSION ---------- */
+function bankPensionSection() {
+  const b = S.bank;
+  const products = (typeof PENSION_PRODUCTS !== 'undefined' ? PENSION_PRODUCTS[S.country] : null) || [];
+
+  let html = `<div class="card"><h3>Retirement Planning</h3>
+    <div class="row"><span>Current pension value</span><b class="mono good">${money(b.pension.totalValue || 0)}</b></div>
+    <div class="row"><span>Total contributed</span><b class="mono">${money(b.pension.totalContributed || 0)}</b></div>
+    <div class="row"><span>Years to retirement (60)</span><b>${Math.max(0, 60 - S.age)}</b></div>
+    ${bankRenderPensionProjection()}
+  </div>`;
+
+  if (b.pension.active.length > 0) {
+    html += `<div class="card"><h3>Active Plans (${b.pension.active.length})</h3>`;
+    b.pension.active.forEach((p, i) => {
+      html += `<div style="padding:8px 0;border-bottom:1px solid #1a1a2a">
+        <div style="display:flex;justify-content:space-between"><b>${p.name}</b><b class="mono good">${money(p.value)}</b></div>
+        <div class="muted small">Contributing ${money(p.monthlyContribution)}/mo · ${p.provider}</div>
+        <button class="opt" style="margin-top:4px;padding:4px 8px;font-size:.72rem;border-color:#fb7185;color:#fb7185" onclick="bankPensionStop(${i})">Stop Contributions</button>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  html += `<div class="card"><h3>Available Plans</h3>`;
+  products.forEach(prod => {
+    if (b.pension.active.some(p => p.productId === prod.id)) return;
+    html += `<div style="padding:8px 0;border-bottom:1px solid #1a1a2a">
+      <div style="display:flex;justify-content:space-between"><b>${prod.name}</b><b class="mono small">${(prod.expectedReturn * 100).toFixed(1)}%</b></div>
+      <div class="muted small">${prod.provider} · Contribution ${(prod.contributionRate * 100).toFixed(1)}%${prod.employerRate ? ' + employer ' + (prod.employerRate * 100).toFixed(1) + '%' : ''}</div>
+      <button class="opt" style="margin-top:4px;padding:4px 8px;font-size:.72rem" onclick="bankPensionStart('${prod.id}')">Enroll</button>
+    </div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+function bankRenderPensionProjection() {
+  const b = S.bank;
+  const total = b.pension.totalValue || 0;
+  const yearsTo60 = Math.max(0, 60 - S.age);
+  const projected = Math.round(total * Math.pow(1.07, yearsTo60));
+  return `<div class="row" style="border-top:1px solid #1a1a2a;padding-top:6px;margin-top:6px">
+    <span>Projected at 60 (7% growth)</span><b class="mono gold">${money(projected)}</b>
+  </div>`;
+}
+
+window.bankPensionStart = function(productId) {
+  const prod = ((typeof PENSION_PRODUCTS !== 'undefined' ? PENSION_PRODUCTS[S.country] : null) || []).find(p => p.id === productId);
+  if (!prod) return;
+  const monthly = S.job && S.job.salary ? Math.round((S.job.salary / 12) * prod.contributionRate) : 0;
+  if (monthly <= 0) { log('You need a job to contribute to pension.'); render(); return; }
+  S.bank.pension.active.push({
+    id: 'pen_' + Math.random().toString(36).slice(2), productId: prod.id, name: prod.name,
+    provider: prod.provider, monthlyContribution: monthly, value: 0, startedYear: gameYear(),
+  });
+  log(`Enrolled in ${prod.name}. Monthly contribution ${money(monthly)}.`);
+  render();
+};
+
+window.bankPensionStop = function(idx) {
+  const p = S.bank.pension.active[idx];
+  if (!p) return;
+  if (!confirm(`Stop contributions to ${p.name}?`)) return;
+  S.bank.pension.totalValue += p.value;
+  S.bank.pension.active.splice(idx, 1);
+  log(`Stopped contributions to ${p.name}.`);
+  render();
+};
+
+/* ============================================================
+   YEAR TICK — banking
+   ============================================================ */
+function bankYearTick() {
+  if (!S || !S.bank || S.age < 18) return;
+  ensureBankState();
+  const b = S.bank;
+
+  // 1. Auto-deposit toggle: sweep positive cash into first account
+  if (b.autoDepositSalary && b.accounts.length > 0 && S.wealth > 0) {
+    const amt = S.wealth;
+    S.wealth = 0;
+    b.accounts[0].balance += amt;
+    bankLogTransaction('Auto-deposit cash sweep', amt, 'income');
+  }
+
+  // 2. Savings account interest
+  b.accounts.forEach(acc => {
+    const bankDef = (BANKS[S.country] || []).find(x => x.id === acc.bankId);
+    if (bankDef && bankDef.savingsRate > 0 && acc.balance > 0) {
+      const interest = Math.round(acc.balance * bankDef.savingsRate);
+      if (interest > 0) acc.balance += interest;
+    }
+  });
+
+  // 3. Certificates: interest + maturity
+  b.certificates = b.certificates.filter(c => {
+    if (c.yearsHeld >= c.term) {
+      const proceeds = c.principal + c.totalInterestPaid;
+      if (c.autoRenew) {
+        c.yearsHeld = 0;
+        c.totalInterestPaid = 0;
+        log(`🔄 Certificate auto-renewed: ${c.name}.`);
+        return true;
+      } else {
+        S.wealth += proceeds;
+        log(`✅ Certificate matured: ${c.name} returned ${money(proceeds)} to cash.`);
+        return false;
+      }
+    }
+    const rate = c.rates[Math.min(c.yearsHeld, c.rates.length - 1)] || 0;
+    const interest = Math.round(c.principal * rate);
+    c.totalInterestPaid += interest;
+    c.yearsHeld++;
+    return true;
+  });
+
+  // 4. Loans: annual payment
+  b.loans.forEach(l => {
+    if (l.remaining <= 0) return;
+    const annualPayment = l.monthlyPayment * 12;
+    if (S.wealth >= annualPayment) {
+      S.wealth -= annualPayment;
+      const interest = Math.round(l.remaining * l.rate);
+      const principalPaid = annualPayment - interest;
+      l.remaining = Math.max(0, l.remaining - principalPaid);
+      l.monthsLeft = Math.max(0, l.monthsLeft - 12);
+    } else {
+      l.missedPayments = (l.missedPayments || 0) + 1;
+      l.remaining = Math.round(l.remaining * 1.05);
+      bankScoreChange(-50, 'Missed payment on ' + l.name);
+    }
+  });
+  b.loans = b.loans.filter(l => l.remaining > 0 && l.monthsLeft > 0);
+
+  // 5. Credit cards: auto-pay or accrue interest
+  b.creditCards.forEach(c => {
+    if (c.balance <= 0) return;
+    const min = BankMath.cardMinPayment(c, c.balance);
+    if (c.autoPay && S.wealth >= min) {
+      S.wealth -= min;
+      c.balance -= min;
+      c.lastPaymentYear = gameYear();
+    } else {
+      c.balance = Math.round(c.balance * (1 + c.apr));
+      if (!c.autoPay) bankScoreChange(-20, 'Card interest accrued: ' + c.name);
+    }
+  });
+
+  // 6. Investments: mark-to-market
+  b.investments.forEach(inv => {
+    if (!inv.volatility && inv.expectedReturn) {
+      inv.currentValue = Math.round(inv.currentValue * (1 + inv.expectedReturn));
+    } else {
+      const ret = (Math.random() - 0.35) * (inv.volatility || 0.1) + (inv.expectedReturn || 0.05);
+      inv.currentValue = Math.max(0, Math.round(inv.currentValue * (1 + ret)));
+    }
+  });
+
+  // 7. Pension: add contributions to value
+  let pensionContrib = 0;
+  b.pension.active.forEach(p => {
+    const yearly = p.monthlyContribution * 12;
+    if (S.wealth >= yearly) {
+      S.wealth -= yearly;
+      p.value = Math.round(p.value * 1.07 + yearly);
+      b.pension.totalContributed = (b.pension.totalContributed || 0) + yearly;
+      pensionContrib += yearly;
+    }
+  });
+  if (pensionContrib > 0) log(`🏛️ Pension contributions this year: ${money(pensionContrib)}.`);
+
+  // 8. Insurance: pay premiums
+  b.insurance.forEach(ins => {
+    if (S.wealth >= ins.annualPremium) {
+      S.wealth -= ins.annualPremium;
+    } else {
+      log(`⚠️ Could not pay premium on ${ins.name}. Policy may lapse.`);
+    }
+  });
+
+  // 9. Goals: auto-deposit
+  b.goals.forEach(g => {
+    if (g.monthlyDeposit > 0 && g.saved < g.target) {
+      const monthly = Math.min(g.monthlyDeposit * 12, g.target - g.saved);
+      if (S.wealth >= monthly) {
+        S.wealth -= monthly;
+        g.saved += monthly;
+      }
+    }
+  });
+
+  // 10. Snapshot net worth for sparkline
+  const nw = bankGetTotalAssets() - bankGetTotalDebt();
+  if (!Array.isArray(b.netWorthHistory)) b.netWorthHistory = [];
+  b.netWorthHistory.unshift({ year: gameYear(), value: nw });
+  b.netWorthHistory = b.netWorthHistory.slice(0, 20);
+}
+GameHooks.on('year', bankYearTick);
+
+/* ============================================================
+   REGISTER TAB
+   ============================================================ */
+GameHooks.registerTab({ id: 'bank', label: '🏦 Bank', order: 6, view: bankView });
