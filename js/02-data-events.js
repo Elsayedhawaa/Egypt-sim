@@ -8,9 +8,7 @@
 
 const GLOBAL_EVENTS = [
 /* ============================================================
-   GLOBAL EVENTS
-   ============================================================ */
-const GLOBAL_EVENTS = [
+ 
   { id: 'school_choice', minAge: 6, maxAge: 6,
     title: 'First day of school',
     text: 'Your family must choose a school for you.',
